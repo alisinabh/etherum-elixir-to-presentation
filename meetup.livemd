@@ -1,0 +1,234 @@
+# Elixir <3 Ethereum
+
+```elixir
+Mix.install(
+  [
+    {:ethers, "~> 0.1.1"},
+    {:kino, "~> 0.11.3"}
+  ],
+  config: [
+    ethereumex: [
+      url: "https://eth.llamarpc.com",
+      http_headers: [{"Content-Type", "application/json"}]
+    ]
+  ]
+)
+```
+
+## Let's connet to the blockchain
+
+#### Bare minimum required libraries
+
+* [`ethereumex`](https://github.com/mana-ethereum/ethereumex) - Etherum JSON-RPC client implementation.
+* [`ex_keccak`](https://github.com/tzumby/ex_keccak) - Keccak256 (Ethereum's hashing algo of choice) NIF for Elixir using Rustler.
+* [`ex_abi`](https://github.com/poanetwork/ex_abi) - Parsing, Encoding and Decoding helpers for EVM blockchains.
+
+*ABI: **A**pplication **B**inary **I**nterface*
+
+## Testing Testing, 123...
+
+To access an Ethereum node or wallet, a Json RPC endpoint is used.
+
+In Ethereum, A block can be identified either by its index (block number) or by its hash (block hash).
+
+We can ask the execution client about the last block number in Ethereum like this.
+
+```elixir
+{:ok, "0x" <> hex} = Ethereumex.HttpClient.eth_block_number()
+String.to_integer(hex, 16)
+```
+
+## How to call smart contract functions?
+
+As indicated in the Ethereums JSON-RPC API documentation, we need to send an `eth_call` request to the execution client with the contract address and transaction data.
+
+```mermaid
+sequenceDiagram
+  participant Client as Client (e.g. Elixir client)
+  participant Server as Ethereum Execution Client
+  Client-->>Client: Prepare and encode transaction data
+  note over Client,Server: JSON RPC (Over HTTP/IPC/WS)
+  Client->>+Server: eth_call({to: CONTRACT, data: TRANSACTION_DATA})
+  Server-->>Server: Execute a temporary transaction and returns the result
+  Server->>-Client: returns eth_call result
+  Client-->>Client: Decode retuned data
+```
+
+Assuming a simple ERC20 `function balanceOf(address owner) returns (uint256)` contract function let's try calling this function using just the bare minimums.
+
+```elixir
+ExKeccak.hash_256("balanceOf(address)") |> Base.encode16(case: :lower)
+```
+
+What is inside data? Pay attention to the first 4 bytes (8 characters) of the last and next block.
+
+```elixir
+data =
+  ABI.encode("balanceOf(address)", [
+    Base.decode16!("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045", case: :mixed)
+  ])
+  |> Base.encode16(case: :lower)
+```
+
+### `data` breakdown
+
+```
+
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Now we can send this data in the `eth_call` request we described earlier.
+
+```elixir
+{:ok, result_hex} =
+  Ethereumex.HttpClient.eth_call(%{
+    data: "0x#{data}",
+    # Tether USD
+    to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    # to: "0x6b175474e89094c44da98b954eedeac495271d0f" # Dai Stablecoin
+  })
+
+result_hex
+|> String.slice(2..-1)
+|> Base.decode16!(case: :lower)
+|> ABI.TypeDecoder.decode([{:uint, 256}])
+```
+
+## Is there a simpler way?
+
+What did you say? Metaprogramming?
+
+### Introducing [`ethers`](https://github.com/alisinabh/elixir_ethers) - A dead simple and feature rich web3 library for Elixir.
+
+```elixir
+abi = """
+[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_upgradedAddress","type":"address"}],"name":"deprecate","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"deprecated","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_evilUser","type":"address"}],"name":"addBlackList","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_from","type":"address"},{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transferFrom","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"upgradedAddress","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"balances","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"maximumFee","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"_totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[],"name":"unpause","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_maker","type":"address"}],"name":"getBlackListStatus","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"allowed","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"paused","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"who","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[],"name":"pause","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"getOwner","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"owner","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"newBasisPoints","type":"uint256"},{"name":"newMaxFee","type":"uint256"}],"name":"setParams","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"amount","type":"uint256"}],"name":"issue","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"amount","type":"uint256"}],"name":"redeem","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"remaining","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"basisPointsRate","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"isBlackListed","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_clearedUser","type":"address"}],"name":"removeBlackList","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"MAX_UINT","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_blackListedUser","type":"address"}],"name":"destroyBlackFunds","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"_initialSupply","type":"uint256"},{"name":"_name","type":"string"},{"name":"_symbol","type":"string"},{"name":"_decimals","type":"uint256"}],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"name":"amount","type":"uint256"}],"name":"Issue","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"amount","type":"uint256"}],"name":"Redeem","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"newAddress","type":"address"}],"name":"Deprecate","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"feeBasisPoints","type":"uint256"},{"indexed":false,"name":"maxFee","type":"uint256"}],"name":"Params","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_blackListedUser","type":"address"},{"indexed":false,"name":"_balance","type":"uint256"}],"name":"DestroyedBlackFunds","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_user","type":"address"}],"name":"AddedBlackList","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_user","type":"address"}],"name":"RemovedBlackList","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"owner","type":"address"},{"indexed":true,"name":"spender","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":true,"name":"to","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Transfer","type":"event"},{"anonymous":false,"inputs":[],"name":"Pause","type":"event"},{"anonymous":false,"inputs":[],"name":"Unpause","type":"event"}]
+"""
+
+defmodule USDT do
+  use Ethers.Contract, abi: abi, default_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+end
+```
+
+```elixir
+USDT.balance_of("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+|> Ethers.call!()
+```
+
+```elixir
+USDT.name()
+|> Ethers.call()
+```
+
+### What can Ethers do?
+
+1. Generate functions and event filters for smart contracts using the ABIs.
+2. Provide utility functions for handling data sent to/received from contracts.
+
+```elixir
+1001
+|> Ethers.Utils.integer_to_hex()
+|> Ethers.Utils.hex_decode!()
+|> Ethers.Utils.hex_encode(false)
+|> Ethers.Utils.hex_to_integer!()
+|> dbg()
+```
+
+```elixir
+{:ok, block} = Ethers.current_block_number()
+```
+
+1. Helps with debuging and DX by providing documentation and useful inspection protocol implementations.
+
+```elixir
+USDT.balance_of("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+|> Ethers.call!()
+|> dbg()
+```
+
+```elixir
+USDT.EventFilters.transfer("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", nil)
+|> Ethers.get_logs!()
+|> dbg()
+```
+
+1. Provides more safety and convenience for inputs with encoders.
+
+```elixir
+ABI.encode("balanceOf(address)", [1234])
+```
+
+```elixir
+USDT.balance_of(1234)
+```
+
+## A practical example
+
+Build a simple form which lists all the ERC20 tokens a wallet has been given in the last 30 days.
+
+```elixir
+{:ok, from_block} = Date.utc_today() |> Date.add(-30) |> Ethers.Utils.date_to_block_number()
+```
+
+```elixir
+alias Ethers.Contracts.ERC20
+
+form =
+  Kino.Control.form(
+    [
+      address: Kino.Input.text("Address or ENS name")
+    ],
+    submit: "Get ERC20 Balances"
+  )
+
+Kino.listen(form, fn event ->
+  address =
+    if String.ends_with?(event.data.address, ".eth") do
+      IO.puts("Resolving ENS name...")
+      Ethers.NameService.resolve!(event.data.address)
+    else
+      event.data.address
+    end
+
+  IO.puts("Fetching logs...")
+
+  token_addresses =
+    ERC20.EventFilters.transfer(nil, address)
+    |> Ethers.get_logs!(fromBlock: from_block)
+    |> Enum.map(& &1.address)
+    |> Enum.uniq()
+
+  calls =
+    Enum.flat_map(
+      token_addresses,
+      &[
+        {ERC20.name(), to: &1},
+        {ERC20.decimals(), to: &1},
+        {ERC20.balance_of(address), to: &1}
+      ]
+    )
+
+  IO.puts("Fetching balances...")
+
+  balances =
+    calls
+    |> Ethers.Multicall.aggregate3()
+    |> Ethers.call!()
+    |> Ethers.Multicall.decode(calls)
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.chunk_every(3)
+    |> dbg()
+
+  balances
+  |> Enum.map(fn [token, decimals, amount] ->
+    %{"Token" => token, "Amount" => amount / 10 ** (decimals || 0)}
+  end)
+  |> Kino.Shorts.data_table(keys: ["Token", "Amount"])
+  |> Kino.render()
+end)
+
+form
+```
+
+### Thank you! Please visit [github.com/alisinabh -> elixir_ethers](https://github.com/alisinabh/elixir_ethers) for more
